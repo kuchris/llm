@@ -162,6 +162,8 @@ def main() -> None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
         device = args.device
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested, but this PyTorch install has no CUDA support. Reinstall CUDA-enabled torch or use --device cpu.")
     print(f"device: {device}")
 
     defaults = PRESETS[args.preset]

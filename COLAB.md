@@ -37,6 +37,14 @@ Option B: upload this folder manually, then:
 !pip install uv
 ```
 
+If you previously ran this repo in Colab before the CUDA fix, remove the old virtual environment:
+
+```python
+!rm -rf .venv
+```
+
+Then `uv run ...` will recreate `.venv` using the CUDA-capable PyTorch wheel available for Colab.
+
 ## 4. Prepare Data
 
 Download WikiText-2:
