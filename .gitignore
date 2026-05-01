@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+
+# Generated training artifacts
+checkpoints/
+data/
+results/
+tokenizers/
+
+# Notebook runtime noise
+.ipynb_checkpoints/
