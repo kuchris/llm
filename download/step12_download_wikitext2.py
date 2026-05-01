@@ -4,10 +4,10 @@ from datasets import load_dataset
 
 
 def main() -> None:
-    # WikiText-2 raw keeps case, punctuation, and numbers.
-    dataset = load_dataset("Salesforce/wikitext", "wikitext-2-raw-v1")
+    # WikiText-103 raw keeps case, punctuation, and numbers.
+    dataset = load_dataset("Salesforce/wikitext", "wikitext-103-raw-v1")
 
-    output_path = Path("data/wikitext2.txt")
+    output_path = Path("data/wikitext103.txt")
     output_path.parent.mkdir(exist_ok=True)
 
     parts = []

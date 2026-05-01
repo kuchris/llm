@@ -4,11 +4,11 @@ from pathlib import Path
 
 
 # Edit these defaults when you do not want to type command options.
-DEFAULT_INPUT_PATH = "data/wikitext2.txt"
-DEFAULT_OUTPUT_PATH = "data/wikitext2_clean.txt"
+DEFAULT_INPUT_PATH = "data/wikitext103.txt"
+DEFAULT_OUTPUT_PATH = "data/wikitext103_clean.txt"
 
 
-def clean_wikitext2(text: str) -> str:
+def clean_wikitext(text: str) -> str:
     # WikiText uses tokenization artifacts like "40 @-@ minute".
     text = text.replace(" @-@ ", "-")
     text = text.replace(" @,@ ", ",")
@@ -40,7 +40,7 @@ def main() -> None:
     output_path = Path(args.out)
 
     text = input_path.read_text(encoding="utf-8")
-    cleaned = clean_wikitext2(text)
+    cleaned = clean_wikitext(text)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(cleaned, encoding="utf-8")

@@ -1,249 +1,376 @@
 # Tiny LLM Lessons
 
-This repo is a step-by-step learning project for building a tiny LLaMA-style language model in PyTorch.
+This repo is a learning project for building and testing small language-model pieces in PyTorch.
 
-The goal is to understand the machine: tokenizers, embeddings, RoPE, attention, MLPs, decoder layers, training, checkpoints, and generation. This is not meant to compete with GPT/Qwen/Llama models.
-
-## Current Main Path
-
-The current recommended path is:
+The repo now has two different tracks:
 
 ```text
-clean WikiText pretraining
--> assistant SFT with response-only loss
--> <eos>-based generation stop
+1. Scratch TinyTransformer
+   Learn tokenizers, RoPE, grouped-query attention, MLPs, decoder layers,
+   training loops, checkpoints, and generation.
+
+2. Local Qwen3 0.6B
+   Download and run a real pretrained small model for comparison.
 ```
 
-Default training preset:
+The important conclusion from the current experiments is simple:
 
-```python
-DEFAULT_PRESET = "assistant_eos_sft_bpe"
+```text
+The scratch model is useful for learning how transformers work.
+It is not strong enough to behave like a real assistant.
+For useful answers, use pretrained Qwen weights and fine-tune later.
 ```
 
-Default generation preset:
+## Current Situation
 
-```python
-DEFAULT_PRESET = "assistant_eos_sft_bpe"
+The scratch model can train and generate, but quality is poor for general conversation. It learns format and repeated patterns, but it does not have enough data, compute, or training time to learn broad knowledge.
+
+The local Qwen model works much better immediately because the knowledge is already in its pretrained weights:
+
+```text
+models/qwen3-0.6b/
 ```
 
-## Requirements
+That folder is ignored by git because the weights are large.
 
-Use `uv`:
+## Environment
+
+Use Python 3.12 with `uv`:
 
 ```powershell
-uv run python step10_generate.py
+uv sync --python 3.12
 ```
 
-The project pins Python to 3.12 because PyTorch is more stable there.
+For VS Code notebooks:
 
-## File Map
+```powershell
+uv add --dev ipykernel
+```
+
+On Windows, the project is configured to install CUDA PyTorch from the PyTorch `cu128` index through `pyproject.toml`.
+
+## Main Files
+
+Core scratch model:
 
 ```text
-step1_tokenizer.py                    character tokenizer
-step2_training_samples.py             next-token sample builder
-step3_tiny_llama_parts.py             ModelConfig and RMSNorm
-step4_rope.py                         RoPE positional encoding
-step5_attention.py                    causal grouped-query attention
-step6_mlp.py                          LLaMA-style MLP / SwiGLU
-step7_decoder_layer.py                one decoder layer
-step8_tiny_transformer.py             full tiny Transformer
-step9_train_tiny_transformer.py       training script
-step10_generate.py                    generation script
-download/step11_download_tiny_shakespeare.py   Tiny Shakespeare downloader
-download/step12_download_wikitext2.py          WikiText-2 downloader
-step13_bpe_tokenizer.py               BPE tokenizer trainer/wrapper
-step15_prepare_wikitext2.py           WikiText cleaner
-step16_prepare_alpaca.py              Alpaca SFT formatter
-step17_prepare_assistant_sft.py       assistant identity SFT data
-step18_prepare_assistant_tokenizer_train.py
-step19_prepare_assistant_eos.py       assistant SFT data with <eos>
+step1_tokenizer.py                 character tokenizer
+step2_training_samples.py          next-token sample builder
+step3_tiny_llama_parts.py          ModelConfig and RMSNorm
+step4_rope.py                      RoPE positional encoding
+step5_attention.py                 causal grouped-query attention
+step6_mlp.py                       LLaMA-style SwiGLU MLP
+step7_decoder_layer.py             one decoder block
+step8_tiny_transformer.py          full scratch Transformer
+step9_train_tiny_transformer.py    scratch training script
+step10_generate.py                 scratch generation script
 ```
 
-## Data Files
+Data and tokenizer prep:
 
 ```text
-data/tiny_text.txt
-data/tiny_shakespeare.txt
-data/wikitext2.txt
-data/wikitext2_clean.txt
-data/alpaca_sft.txt
-data/assistant_sft.txt
-data/assistant_tokenizer_train.txt
-data/assistant_eos_sft.txt
-data/assistant_eos_tokenizer_train.txt
+download/step11_download_tiny_shakespeare.py
+download/step12_download_wikitext2.py       downloads WikiText-103 now
+step13_bpe_tokenizer.py                     BPE tokenizer trainer
+step15_prepare_wikitext2.py                 WikiText-103 cleaner
+step16_prepare_alpaca.py                    Alpaca formatter
+step20_prepare_dolly.py                     Dolly-15k formatter
+step21_prepare_bea_grammar.py               BEA / WI+LOCNESS grammar formatter
+step22_prepare_free_tokenizer_train.py      builds combined tokenizer text
 ```
 
-## Tokenizers
-
-Character tokenizer:
+Qwen tools:
 
 ```text
-text -> one token per unique character
+download/step23_download_qwen3.py     downloads Qwen/Qwen3-0.6B
+step24_generate_qwen3.py              runs Qwen weights + Qwen tokenizer
+step25_inspect_qwen3.py               inspects Qwen config, tokenizer, weights
+step26_compare_tokenizers.py          compares repo BPE vs Qwen tokenizer
+step27_test_qwen3.py                  batch tests Qwen prompts
+step28_estimate_scratch_model.py      estimates scratch model size/memory
+hf_tokenizer.py                       wrapper for Hugging Face tokenizers
 ```
 
-BPE tokenizer:
+Notebooks:
 
 ```text
-text -> learned chunks/subwords
+colab_tiny_llm.ipynb                  local VS Code scratch/free-data pipeline
+qwen3_0_6b_local.ipynb                pretrained Qwen test notebook
+qwen_tokenizer_scratch_model.ipynb    scratch model using Qwen tokenizer only
 ```
 
-The current EOS assistant tokenizer is:
+## Scratch Model Config
+
+The default scratch model shape is in `step3_tiny_llama_parts.py`:
+
+```python
+dim: int = 768
+n_layers: int = 12
+n_heads: int = 16
+n_kv_heads: int = 8
+head_dim: int | None = None
+vocab_size: int = 6144
+hidden_dim: int | None = None
+multiple_of: int = 64
+max_seq_len: int = 512
+norm_eps: float = 1e-5
+dropout: float = 0.1
+```
+
+If `head_dim` is `None`, attention uses:
 
 ```text
-tokenizers/assistant_eos_bpe_4000.json
+head_dim = dim // n_heads
 ```
 
-It includes:
+Qwen-style experiments can set `head_dim=128`, where attention projects to `n_heads * head_dim` instead of just `dim`.
+
+## Scratch Training Presets
+
+The active scratch training presets live in `step9_train_tiny_transformer.py`.
+
+Current default:
 
 ```text
-<unk>
-<eos>
+free_wikitext103_pretrain_bpe
 ```
 
-`<eos>` means end of response. Generation stops when the model produces it.
+Free-data path:
 
-## Build Data
+```text
+free_wikitext103_pretrain_bpe
+free_dolly_sft_bpe
+free_bea_grammar_sft_bpe
+```
 
-Download WikiText-2:
+Qwen-tokenizer scratch path:
+
+```text
+qwen_tokenizer_tiny_pretrain
+qwen_tokenizer_tiny_sft
+```
+
+Qwen-shape scratch experiment:
+
+```text
+qwen_shape_scratch_pretrain
+```
+
+The Qwen-shape experiment is not recommended on this machine. The estimator reports about `751M` parameters and roughly `11 GiB` of AdamW training memory before activations, so it is too close to the limit of a 12 GB laptop GPU.
+
+## Build Free Scratch Data
+
+This is the current free-data scratch pipeline:
 
 ```powershell
 uv run python download/step12_download_wikitext2.py
-```
-
-Clean WikiText:
-
-```powershell
 uv run python step15_prepare_wikitext2.py
+uv run python step20_prepare_dolly.py
+uv run python step21_prepare_bea_grammar.py
+uv run python step22_prepare_free_tokenizer_train.py
 ```
 
-Prepare Alpaca:
+Train the shared `6144` BPE tokenizer:
 
 ```powershell
-uv run python step16_prepare_alpaca.py
+uv run python step13_bpe_tokenizer.py --vocab-size 6144 --max-chars 10000000 --special-token '<unk>' --special-token '<eos>'
 ```
 
-Prepare assistant EOS data:
-
-```powershell
-uv run python step19_prepare_assistant_eos.py
-```
-
-Train EOS BPE tokenizer:
-
-```powershell
-uv run python step13_bpe_tokenizer.py --data data/assistant_eos_tokenizer_train.txt --out tokenizers/assistant_eos_bpe_4000.json --vocab-size 4000 --max-chars 3000000 --special-token '<unk>' --special-token '<eos>'
-```
-
-## Train
-
-Pretrain first:
-
-```powershell
-uv run python step9_train_tiny_transformer.py --preset assistant_eos_pretrain_bpe
-```
-
-Then SFT:
-
-```powershell
-uv run python step9_train_tiny_transformer.py --preset assistant_eos_sft_bpe
-```
-
-The SFT preset loads the pretrain checkpoint:
+This writes:
 
 ```text
-checkpoints/assistant_eos_pretrain_bpe/tiny_transformer.pt
+tokenizers/free_bpe_6144.json
 ```
 
-and saves:
+## Train Scratch Model
 
-```text
-checkpoints/assistant_eos_sft_bpe/tiny_transformer.pt
+Pretrain:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset free_wikitext103_pretrain_bpe --device auto
 ```
 
-## Generate
+General SFT:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset free_dolly_sft_bpe --device auto
+```
+
+Grammar SFT:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset free_bea_grammar_sft_bpe --device auto
+```
+
+Resume a stopped run:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset free_wikitext103_pretrain_bpe --device auto --resume
+```
+
+Autosave defaults to every `200` steps:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset free_wikitext103_pretrain_bpe --device auto --save-every 50
+```
+
+Checkpoint files are not updated continuously. They are written only on autosave, interrupt, or final save.
+
+## Generate With Scratch Model
 
 After SFT:
 
 ```powershell
-uv run python step10_generate.py
+uv run python step10_generate.py --preset free_dolly_sft_bpe --device auto --prompt "Where is Hong Kong?"
 ```
 
-Example prompt:
+For the BEA grammar stage:
+
+```powershell
+uv run python step10_generate.py --preset free_bea_grammar_sft_bpe --device auto --prompt "Correct this sentence: She go to school yesterday."
+```
+
+Current limitation:
 
 ```text
-hi, who are you?
+The scratch model output is often bad.
+This is expected for a small model trained from scratch on limited data.
 ```
 
-The script wraps it as:
+## Run Qwen3 0.6B
+
+Download:
+
+```powershell
+uv run python download/step23_download_qwen3.py
+```
+
+Generate:
+
+```powershell
+uv run python step24_generate_qwen3.py --device auto --prompt "Where is Hong Kong?"
+```
+
+Batch test:
+
+```powershell
+uv run python step27_test_qwen3.py --device auto
+```
+
+Qwen uses:
 
 ```text
-### Instruction:
-hi, who are you?
-
-### Response:
+Qwen tokenizer
+Qwen pretrained weights
 ```
 
-Then it stops at `<eos>`.
+That is why it can answer much better than the scratch model.
 
-## Key Concepts
+## Inspect Qwen
 
-Embedding:
+Inspect architecture, tokenizer, tensor shapes, and parameter counts:
+
+```powershell
+uv run python step25_inspect_qwen3.py
+```
+
+Useful options:
+
+```powershell
+uv run python step25_inspect_qwen3.py --limit 50
+uv run python step25_inspect_qwen3.py --raw-config
+```
+
+The downloaded `Qwen/Qwen3-0.6B` config is roughly:
 
 ```text
-token id -> learned vector
+dim / hidden_size: 1024
+n_layers: 28
+n_heads: 16
+n_kv_heads: 8
+head_dim: 128
+vocab_size: 151936
+hidden_dim / intermediate_size: 3072
+max_position_embeddings: 40960
+norm_eps: 1e-6
+dropout: 0.0
 ```
 
-Attention:
+The local safetensors count is about:
 
 ```text
-tokens look at useful previous tokens
+total tensors: 751.6M parameters
+model body:    596.0M parameters
+lm_head:       155.6M parameters
 ```
 
-MLP:
+## Tokenizer Experiments
+
+Compare repo BPE with Qwen tokenizer:
+
+```powershell
+uv run python step26_compare_tokenizers.py
+```
+
+Custom text:
+
+```powershell
+uv run python step26_compare_tokenizers.py --text "Where is Hong Kong?"
+```
+
+Qwen tokenizer is much more efficient, especially for multilingual text and code. But using Qwen tokenizer with the scratch model does not transfer Qwen knowledge.
+
+This experiment is available:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset qwen_tokenizer_tiny_pretrain --device auto
+uv run python step9_train_tiny_transformer.py --preset qwen_tokenizer_tiny_sft --device auto
+```
+
+It is mostly educational. Checkpoints are large because the Qwen vocabulary is about `151k`.
+
+## What We Tried
+
+These experiments were useful but not the final path:
 
 ```text
-each token vector is transformed independently
+WikiText-103 + Dolly + BEA from scratch
+Qwen tokenizer with scratch weights
+Qwen-shaped scratch model
 ```
 
-RoPE:
+Observed results:
 
 ```text
-adds position information by rotating query/key vectors
+The scratch model learns format faster than facts.
+BEA grammar SFT biases the model toward essay-like rewriting.
+Qwen tokenizer improves tokenization but not knowledge.
+Qwen-shaped scratch training is too heavy for the current GPU setup.
 ```
 
-Pretraining:
+## Practical Next Step
+
+The useful direction is:
 
 ```text
-learn general next-token prediction from normal text
+Use Qwen pretrained weights
+Collect or prepare custom instruction data
+Fine-tune with LoRA / QLoRA
+Evaluate before replacing the model
 ```
 
-SFT:
+Do not train on the model's own unverified outputs. A self-improving loop needs human corrections, filtering, evaluation, and checkpoint promotion.
+
+## Artifact Policy
+
+These folders are generated and ignored by git:
 
 ```text
-learn instruction -> response behavior
+checkpoints/
+data/
+models/
+tokenizers/
+results/
 ```
 
-Response-only loss:
-
-```text
-only response tokens count toward SFT loss
-```
-
-## Model Size
-
-Model shape is in `step3_tiny_llama_parts.py`:
-
-```python
-dim: int = 128
-n_layers: int = 4
-n_heads: int = 4
-n_kv_heads: int = 2
-```
-
-If you change model shape, train a new checkpoint. Old checkpoints with different shapes will not load.
-
-## Current Limits
-
-This is still a tiny CPU-trained model. It can learn format and repeated behaviors, but it may hallucinate and fail broad reasoning tasks.
-
-For real assistant quality, use a pretrained model and fine-tune it. This project is for learning how the pieces work.
+That keeps large datasets, weights, and checkpoints out of the repository.

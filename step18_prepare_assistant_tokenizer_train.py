@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 # Edit these defaults when you do not want to type command options.
-WIKITEXT_PATH = "data/wikitext2_clean.txt"
+WIKITEXT_PATH = "data/wikitext103_clean.txt"
 ASSISTANT_SFT_PATH = "data/assistant_sft.txt"
 OUTPUT_PATH = "data/assistant_tokenizer_train.txt"
 

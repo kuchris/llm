@@ -6,7 +6,7 @@ from step17_prepare_assistant_sft import IDENTITY_EXAMPLES, IDENTITY_REPEAT
 
 # Edit these defaults when you do not want to type command options.
 ALPACA_PATH = "data/alpaca_sft.txt"
-WIKITEXT_PATH = "data/wikitext2_clean.txt"
+WIKITEXT_PATH = "data/wikitext103_clean.txt"
 SFT_OUTPUT_PATH = "data/assistant_eos_sft.txt"
 TOKENIZER_TRAIN_OUTPUT_PATH = "data/assistant_eos_tokenizer_train.txt"
 EOS_TOKEN = "<eos>"

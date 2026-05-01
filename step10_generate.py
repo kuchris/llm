@@ -2,18 +2,20 @@
 
 
 import argparse
+import sys
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
 
+from hf_tokenizer import HFTokenizer
 from step1_tokenizer import CharTokenizer
 from step13_bpe_tokenizer import BPETokenizer
 from step8_tiny_transformer import TinyTransformer
 
 
 # Edit this when you want to switch the default generation target.
-DEFAULT_PRESET = "assistant_eos_sft_bpe"
+DEFAULT_PRESET = "free_bea_grammar_sft_bpe"
 
 # Presets keep dataset results separated.
 PRESETS = {
@@ -89,6 +91,33 @@ PRESETS = {
         "temperature": 0.5,
         "out": "",
     },
+    "free_dolly_sft_bpe": {
+        "checkpoint": "checkpoints/free_dolly_sft_bpe/tiny_transformer.pt",
+        "prompt": None,
+        "prompt_template": "### Instruction:\n{prompt}\n\n### Response:\n",
+        "stop": ["<eos>", "\n\n### Instruction:"],
+        "max_new_tokens": 160,
+        "temperature": 0.5,
+        "out": "",
+    },
+    "free_bea_grammar_sft_bpe": {
+        "checkpoint": "checkpoints/free_bea_grammar_sft_bpe/tiny_transformer.pt",
+        "prompt": "Correct the grammar, spelling, and punctuation mistakes in the following text.\n\n### Input:\nShe go to school yesterday.",
+        "prompt_template": "### Instruction:\n{prompt}\n\n### Response:\n",
+        "stop": ["<eos>", "\n\n### Instruction:"],
+        "max_new_tokens": 160,
+        "temperature": 0.3,
+        "out": "",
+    },
+    "qwen_tokenizer_tiny_sft": {
+        "checkpoint": "checkpoints/qwen_tokenizer_tiny_sft/tiny_transformer.pt",
+        "prompt": None,
+        "prompt_template": "### Instruction:\n{prompt}\n\n### Response:\n",
+        "stop": ["<|im_end|>", "\n\n### Instruction:"],
+        "max_new_tokens": 120,
+        "temperature": 0.5,
+        "out": "",
+    },
 }
 
 
@@ -106,6 +135,8 @@ def build_tokenizer_from_checkpoint(checkpoint: dict) -> CharTokenizer | BPEToke
     tokenizer_type = checkpoint.get("tokenizer_type", "char")
     if tokenizer_type == "bpe":
         return BPETokenizer.from_json(checkpoint["tokenizer_json"])
+    if tokenizer_type == "hf":
+        return HFTokenizer(checkpoint["tokenizer_name"])
 
     return build_tokenizer_from_vocab(checkpoint["vocab"])
 
@@ -146,6 +177,9 @@ def generate(
 
 
 def main() -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     defaults = PRESETS[DEFAULT_PRESET]
 
     parser = argparse.ArgumentParser()

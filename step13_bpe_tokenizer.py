@@ -5,10 +5,10 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 
 
 # Edit these defaults when you do not want to type command options.
-DEFAULT_DATA_PATH = "data/wikitext2.txt"
-DEFAULT_OUTPUT_PATH = "tokenizers/wikitext2_bpe_2000.json"
-DEFAULT_VOCAB_SIZE = 2000
-DEFAULT_MAX_CHARS = 500000
+DEFAULT_DATA_PATH = "data/free_tokenizer_train.txt"
+DEFAULT_OUTPUT_PATH = "tokenizers/free_bpe_6144.json"
+DEFAULT_VOCAB_SIZE = 6144
+DEFAULT_MAX_CHARS = 10000000
 
 
 class BPETokenizer:
@@ -69,12 +69,13 @@ def main() -> None:
     parser.add_argument("--out", default=DEFAULT_OUTPUT_PATH)
     parser.add_argument("--vocab-size", type=int, default=DEFAULT_VOCAB_SIZE)
     parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
-    parser.add_argument("--special-token", action="append", default=["<unk>"])
+    parser.add_argument("--special-token", action="append", default=[])
     args = parser.parse_args()
 
     data_path = Path(args.data)
     output_path = Path(args.out)
-    train_bpe_tokenizer(data_path, output_path, args.vocab_size, args.max_chars, args.special_token)
+    special_tokens = list(dict.fromkeys(args.special_token or ["<unk>"]))
+    train_bpe_tokenizer(data_path, output_path, args.vocab_size, args.max_chars, special_tokens)
 
     tokenizer = BPETokenizer.from_file(output_path)
     sample = "Europium is a chemical element."

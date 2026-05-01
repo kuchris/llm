@@ -9,34 +9,37 @@ import torch.nn as nn
 @dataclass
 class ModelConfig:
     # Model width: each token becomes a vector with this many numbers.
-    dim: int = 256
+    dim: int = 768
 
     # Keep the model shallow for CPU learning.
-    n_layers: int = 4
+    n_layers: int = 12
 
     # Number of attention heads. dim must divide evenly by n_heads.
-    n_heads: int = 8
+    n_heads: int = 16
 
     # Number of key/value heads for grouped-query attention later.
-    n_kv_heads: int = 4
+    n_kv_heads: int = 8
+
+    # Per-head dimension. None means use dim // n_heads.
+    head_dim: int | None = None
 
     # Character tokenizer vocab is tiny, but leave room for later data.
-    vocab_size: int = 128
+    vocab_size: int = 6144
 
     # Inner size used by the MLP. None means calculate it from dim.
     hidden_dim: int | None = None
 
     # Round the MLP hidden size to a clean multiple.
-    multiple_of: int = 32
+    multiple_of: int = 64
 
     # Maximum number of tokens the model can look at at once.
-    max_seq_len: int = 128
+    max_seq_len: int = 512
 
     # Small value that prevents division by zero in normalization.
     norm_eps: float = 1e-5
 
     # Dropout is useful during training. We can set it to 0 for first tests.
-    dropout: float = 0.0
+    dropout: float = 0.1
 
 
 class RMSNorm(nn.Module):

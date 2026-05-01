@@ -28,7 +28,7 @@ class Attention(nn.Module):
         # Split the model vector across multiple attention heads.
         self.n_heads = args.n_heads
         self.n_kv_heads = args.n_kv_heads
-        self.head_dim = args.dim // args.n_heads
+        self.head_dim = args.head_dim if args.head_dim is not None else args.dim // args.n_heads
         self.n_rep = args.n_heads // args.n_kv_heads
 
         # Q has one head per attention head.
@@ -82,8 +82,8 @@ class Attention(nn.Module):
         # Mix value vectors using the attention weights.
         output = weights @ xv
 
-        # Move back to batch, seq_len, dim.
-        output = output.transpose(1, 2).contiguous().view(batch, seq_len, dim)
+        # Move back to batch, seq_len, n_heads * head_dim.
+        output = output.transpose(1, 2).contiguous().view(batch, seq_len, self.n_heads * self.head_dim)
         return self.wo(output)
 
 

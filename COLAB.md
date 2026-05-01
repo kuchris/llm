@@ -47,7 +47,7 @@ Then `uv run ...` will recreate `.venv` using the CUDA-capable PyTorch wheel ava
 
 ## 4. Prepare Data
 
-Download WikiText-2:
+Download WikiText-103:
 
 ```python
 !uv run python download/step12_download_wikitext2.py
