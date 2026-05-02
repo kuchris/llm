@@ -1,5 +1,3 @@
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -40,7 +38,7 @@ class Attention(nn.Module):
 
         # Project the mixed attention output back to model dimension.
         self.wo = nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
-        self.dropout = nn.Dropout(args.dropout)
+        self.attn_dropout = args.dropout
 
     def forward(
         self,
@@ -62,25 +60,15 @@ class Attention(nn.Module):
         xk = repeat_kv(xk, self.n_rep)
         xv = repeat_kv(xv, self.n_rep)
 
-        # Move heads before seq_len for matrix multiplication.
+        # scaled_dot_product_attention expects batch, heads, seq_len, head_dim.
         xq = xq.transpose(1, 2)
         xk = xk.transpose(1, 2)
         xv = xv.transpose(1, 2)
 
-        # Compare each query position with all key positions.
-        scores = xq @ xk.transpose(-2, -1)
-        scores = scores / math.sqrt(self.head_dim)
-
-        # Causal mask blocks looking at future tokens.
-        mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device, dtype=torch.bool), diagonal=1)
-        scores = scores.masked_fill(mask, float("-inf"))
-
-        # Convert scores into attention weights.
-        weights = F.softmax(scores, dim=-1)
-        weights = self.dropout(weights)
-
-        # Mix value vectors using the attention weights.
-        output = weights @ xv
+        # Flash Attention path when available; falls back to standard attention.
+        # is_causal=True applies the causal mask internally — no manual mask needed.
+        dropout_p = self.attn_dropout if self.training else 0.0
+        output = F.scaled_dot_product_attention(xq, xk, xv, dropout_p=dropout_p, is_causal=True)
 
         # Move back to batch, seq_len, n_heads * head_dim.
         output = output.transpose(1, 2).contiguous().view(batch, seq_len, self.n_heads * self.head_dim)

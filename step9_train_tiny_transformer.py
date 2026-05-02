@@ -4,13 +4,13 @@
 
 
 import argparse
+import json
+import math
 import os
 import sys
 from pathlib import Path
 
-# This tiny CPU project does not use torch.compile.
-# Disabling Dynamo avoids slow lazy-import startup during optimizer creation.
-os.environ.setdefault("TORCH_DISABLE_DYNAMO", "1")
+import numpy as np
 
 import torch
 import torch.nn.functional as F
@@ -26,6 +26,48 @@ from step8_tiny_transformer import TinyTransformer
 # Edit this when you want to switch the default training target.
 DEFAULT_PRESET = "free_wikitext103_pretrain_bpe"
 RESPONSE_MARKER = "### Response:\n"
+
+
+def read_text_limited(path: Path, max_chars: int) -> str:
+    if max_chars <= 0:
+        return path.read_text(encoding="utf-8")
+
+    chunks = []
+    remaining = max_chars
+    with path.open("r", encoding="utf-8") as handle:
+        while remaining > 0:
+            chunk = handle.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+    return "".join(chunks)
+
+
+class MemmapTokenDataset:
+    def __init__(self, manifest_path: Path):
+        self.manifest_path = manifest_path
+        self.root = manifest_path.parent
+        self.manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        self.dtype = np.dtype(self.manifest["dtype"])
+        self.shards = []
+        for shard in self.manifest["shards"]:
+            tokens = int(shard["tokens"])
+            if tokens <= 0:
+                continue
+            path = self.root / shard["path"]
+            data = np.memmap(path, dtype=self.dtype, mode="r", shape=(tokens,))
+            self.shards.append({"path": path, "tokens": tokens, "data": data})
+        if not self.shards:
+            raise ValueError(f"no usable shards found in {manifest_path}")
+
+    @property
+    def vocab_size(self) -> int:
+        return int(self.manifest["vocab_size"])
+
+    def __len__(self) -> int:
+        return sum(shard["tokens"] for shard in self.shards)
+
 
 # Presets keep datasets and checkpoints separated.
 PRESETS = {
@@ -226,16 +268,82 @@ PRESETS = {
         "init_checkpoint": "checkpoints/free_dolly_sft_bpe/tiny_transformer.pt",
     },
     "qwen_tokenizer_tiny_pretrain": {
-        "data": "data/wikitext103_clean.txt",
+        "data": "data/fineweb_edu_sample_10bt.txt",
         "checkpoint": "checkpoints/qwen_tokenizer_tiny_pretrain/tiny_transformer.pt",
-        "max_chars": 1000000,
-        "block_size": 128,
-        "batch_size": 2,
-        "max_iters": 2000,
-        "learning_rate": 1e-3,
+        "max_chars": 200000000,
+        "block_size": 1024,
+        "batch_size": 4,
+        "max_iters": 50000,
+        "learning_rate": 3e-4,
         "tokenizer": "hf",
         "tokenizer_file": "",
         "tokenizer_name": "models/qwen3-0.6b",
+        "task": "lm",
+        "init_checkpoint": "",
+        "dim": 768,
+        "n_layers": 12,
+        "n_heads": 12,
+        "n_kv_heads": 6,
+        "hidden_dim": 1024,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.0,
+    },
+    "qwen_tokenizer_tiny_pretrain_sharded": {
+        "data": "data/fineweb_edu_qwen_uint32/manifest.json",
+        "checkpoint": "checkpoints/qwen_tokenizer_tiny_pretrain/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 256,
+        "batch_size": 4,
+        "max_iters": 50000,
+        "learning_rate": 3e-4,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "models/qwen3-0.6b",
+        "task": "lm_memmap",
+        "init_checkpoint": "",
+        "dim": 768,
+        "n_layers": 8,
+        "n_heads": 8,
+        "n_kv_heads": 4,
+        "hidden_dim": 2048,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.0,
+    },
+    "qwen_tokenizer_tiny_sft": {
+        "data": "data/alpaca_cleaned_train_eos_sft.txt",
+        "checkpoint": "checkpoints/qwen_tokenizer_tiny_alpaca_sft/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 256,
+        "batch_size": 4,
+        "max_iters": 13000,
+        "learning_rate": 1e-4,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "models/qwen3-0.6b",
+        "task": "sft",
+        "init_checkpoint": "checkpoints/qwen_tokenizer_tiny_pretrain/tiny_transformer.pt",
+        "dim": 768,
+        "n_layers": 8,
+        "n_heads": 8,
+        "n_kv_heads": 4,
+        "hidden_dim": 2048,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.1,
+    },
+    "english_bpe_tiny_pretrain": {
+        "data": "data/fineweb_edu_sample_10bt.txt",
+        "checkpoint": "checkpoints/english_bpe_tiny_pretrain/tiny_transformer.pt",
+        "max_chars": 200000000,
+        "block_size": 512,
+        "batch_size": 4,
+        "max_iters": 50000,
+        "learning_rate": 3e-4,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "tokenizers/english_bpe_8192",
         "task": "lm",
         "init_checkpoint": "",
         "dim": 384,
@@ -247,19 +355,19 @@ PRESETS = {
         "norm_eps": 1e-6,
         "dropout": 0.1,
     },
-    "qwen_tokenizer_tiny_sft": {
-        "data": "data/dolly_train_eos_sft.txt",
-        "checkpoint": "checkpoints/qwen_tokenizer_tiny_sft/tiny_transformer.pt",
-        "max_chars": 1000000,
-        "block_size": 128,
-        "batch_size": 2,
-        "max_iters": 1000,
-        "learning_rate": 5e-4,
+    "english_bpe_tiny_sft": {
+        "data": "data/alpaca_cleaned_train_eos_sft.txt",
+        "checkpoint": "checkpoints/english_bpe_tiny_alpaca_sft/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 512,
+        "batch_size": 4,
+        "max_iters": 10000,
+        "learning_rate": 1e-4,
         "tokenizer": "hf",
         "tokenizer_file": "",
-        "tokenizer_name": "models/qwen3-0.6b",
+        "tokenizer_name": "tokenizers/english_bpe_8192",
         "task": "sft",
-        "init_checkpoint": "checkpoints/qwen_tokenizer_tiny_pretrain/tiny_transformer.pt",
+        "init_checkpoint": "checkpoints/english_bpe_tiny_pretrain/tiny_transformer.pt",
         "dim": 384,
         "n_layers": 6,
         "n_heads": 6,
@@ -322,6 +430,29 @@ def get_batch(data: torch.Tensor, batch_size: int, block_size: int) -> tuple[tor
     # y is the same text window shifted one token to the left.
     y = torch.stack([data[start + 1 : start + block_size + 1] for start in starts])
     return x, y
+
+
+def get_batch_memmap(
+    data: MemmapTokenDataset,
+    batch_size: int,
+    block_size: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    xs = []
+    ys = []
+    usable_shards = [shard for shard in data.shards if shard["tokens"] > block_size + 1]
+    if not usable_shards:
+        raise ValueError("no memmap shard is long enough for the chosen block size")
+
+    shard_indexes = torch.randint(0, len(usable_shards), (batch_size,))
+    for shard_index in shard_indexes.tolist():
+        shard = usable_shards[shard_index]
+        start = int(torch.randint(0, shard["tokens"] - block_size - 1, (1,)).item())
+        window = np.asarray(shard["data"][start : start + block_size + 1], dtype=np.int64)
+        x = torch.from_numpy(window[:-1].copy()).long()
+        y = torch.from_numpy(window[1:].copy()).long()
+        xs.append(x)
+        ys.append(y)
+    return torch.stack(xs), torch.stack(ys)
 
 
 def get_batch_sft(
@@ -428,7 +559,7 @@ def main() -> None:
     parser.add_argument("--tokenizer", choices=["char", "bpe", "hf"], default=None)
     parser.add_argument("--tokenizer-file", default=None)
     parser.add_argument("--tokenizer-name", default=None)
-    parser.add_argument("--task", choices=["lm", "sft"], default=None)
+    parser.add_argument("--task", choices=["lm", "sft", "lm_memmap"], default=None)
     parser.add_argument("--init-checkpoint", default=None)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--resume", action="store_true")
@@ -444,17 +575,28 @@ def main() -> None:
     if device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA was requested, but this PyTorch install has no CUDA support. Reinstall CUDA-enabled torch or use --device cpu.")
     print(f"device: {device}")
+    if device == "cuda":
+        # Skip per-shape kernel benchmarking — shapes are fixed so autotuning buys nothing
+        # and causes a multi-minute hang on the first step with unusual sizes (e.g. 151k vocab).
+        torch.backends.cudnn.benchmark = False
+        torch.backends.cuda.matmul.allow_tf32 = True
+    use_amp = device == "cuda"
+    amp_dtype = torch.bfloat16 if (use_amp and torch.cuda.is_bf16_supported()) else torch.float16
+    scaler = torch.cuda.amp.GradScaler(enabled=(use_amp and amp_dtype == torch.float16))
+    if use_amp:
+        print(f"amp: {amp_dtype}, grad_scaler: {scaler.is_enabled()}")
 
-    # Load and tokenize the tiny dataset.
+    # Load and tokenize the dataset.
     data_path = Path(cli_args.data or defaults["data"])
-    text = data_path.read_text(encoding="utf-8")
     max_chars = cli_args.max_chars if cli_args.max_chars is not None else defaults["max_chars"]
-    if max_chars > 0:
-        text = text[:max_chars]
 
     tokenizer_type = cli_args.tokenizer or defaults["tokenizer"]
     tokenizer_file = cli_args.tokenizer_file if cli_args.tokenizer_file is not None else defaults["tokenizer_file"]
     tokenizer_name = cli_args.tokenizer_name if cli_args.tokenizer_name is not None else defaults["tokenizer_name"]
+
+    task = cli_args.task or defaults["task"]
+    text = "" if task == "lm_memmap" else read_text_limited(data_path, max_chars)
+
     if tokenizer_type == "char":
         tokenizer = CharTokenizer(text)
     elif tokenizer_type == "bpe":
@@ -467,10 +609,16 @@ def main() -> None:
         tokenizer = HFTokenizer(tokenizer_name)
     else:
         raise ValueError(f"unsupported tokenizer type: {tokenizer_type}")
-
-    task = cli_args.task or defaults["task"]
     if task == "sft":
         token_ids, loss_mask = build_sft_token_stream(tokenizer, text)
+    elif task == "lm_memmap":
+        token_ids = MemmapTokenDataset(data_path)
+        if token_ids.vocab_size != tokenizer.vocab_size:
+            raise ValueError(
+                f"memmap vocab size {token_ids.vocab_size} does not match "
+                f"tokenizer vocab size {tokenizer.vocab_size}"
+            )
+        loss_mask = None
     else:
         token_ids = torch.tensor(tokenizer.encode(text), dtype=torch.long)
         loss_mask = None
@@ -491,6 +639,15 @@ def main() -> None:
     model = TinyTransformer(model_args).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+    # Warmup for 500 steps then cosine decay to 10% of peak LR.
+    warmup_steps = min(500, max_iters // 20)
+
+    def lr_lambda(step: int) -> float:
+        if step < warmup_steps:
+            return step / max(1, warmup_steps)
+        progress = (step - warmup_steps) / max(1, max_iters - warmup_steps)
+        return 0.1 + 0.9 * 0.5 * (1.0 + math.cos(math.pi * progress))
+
     first_loss = None
     last_loss = None
     start_step = 0
@@ -501,6 +658,8 @@ def main() -> None:
         model.load_state_dict(resume_data["model"])
         if "optimizer" in resume_data:
             optimizer.load_state_dict(resume_data["optimizer"])
+            for group in optimizer.param_groups:
+                group["lr"] = learning_rate
         first_loss = resume_data.get("first_loss")
         last_loss = resume_data.get("last_loss")
         start_step = int(resume_data.get("step", -1)) + 1
@@ -518,9 +677,21 @@ def main() -> None:
             else:
                 print(f"init checkpoint not found, training from scratch: {init_path}")
 
-    if start_step > max_iters:
+    if start_step >= max_iters:
         print(f"checkpoint already reached step {start_step - 1}, which is >= max_iters {max_iters}")
         return
+
+    # LambdaLR with last_epoch >= 0 requires initial_lr in param_groups (normally set
+    # on first scheduler.step()). Set it explicitly so resume works correctly.
+    for group in optimizer.param_groups:
+        group.setdefault("initial_lr", learning_rate)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch=start_step - 1)
+
+    if device == "cuda" and sys.platform != "win32":
+        model = torch.compile(model)
+        print("torch.compile enabled (first step will compile — expect ~1 min delay)")
+    elif device == "cuda":
+        print("torch.compile skipped (Triton not supported on Windows)")
 
     model.train()
     use_tqdm = sys.stderr.isatty()
@@ -532,6 +703,9 @@ def main() -> None:
         for step in progress:
             if task == "sft":
                 x, y, y_mask = get_batch_sft(token_ids, loss_mask, batch_size, block_size)
+            elif task == "lm_memmap":
+                x, y = get_batch_memmap(token_ids, batch_size, block_size)
+                y_mask = None
             else:
                 x, y = get_batch(token_ids, batch_size, block_size)
                 y_mask = None
@@ -540,24 +714,29 @@ def main() -> None:
             if y_mask is not None:
                 y_mask = y_mask.to(device)
 
-            # logits shape: batch, block_size, vocab_size.
-            logits = model(x)
+            with torch.autocast(device_type=device, dtype=amp_dtype, enabled=use_amp):
+                # logits shape: batch, block_size, vocab_size.
+                logits = model(x)
 
-            # Cross entropy compares predicted next-token scores with target token ids.
-            if task == "sft":
-                loss_per_token = F.cross_entropy(
-                    logits.reshape(-1, tokenizer.vocab_size),
-                    y.reshape(-1),
-                    reduction="none",
-                )
-                y_mask = y_mask.reshape(-1)
-                loss = (loss_per_token * y_mask).sum() / y_mask.sum().clamp_min(1.0)
-            else:
-                loss = F.cross_entropy(logits.reshape(-1, tokenizer.vocab_size), y.reshape(-1))
+                # Cross entropy compares predicted next-token scores with target token ids.
+                if task == "sft":
+                    loss_per_token = F.cross_entropy(
+                        logits.reshape(-1, tokenizer.vocab_size),
+                        y.reshape(-1),
+                        reduction="none",
+                    )
+                    y_mask = y_mask.reshape(-1)
+                    loss = (loss_per_token * y_mask).sum() / y_mask.sum().clamp_min(1.0)
+                else:
+                    loss = F.cross_entropy(logits.reshape(-1, tokenizer.vocab_size), y.reshape(-1))
 
             optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scaler.step(optimizer)
+            scaler.update()
+            scheduler.step()
             last_completed_step = step
 
             if first_loss is None:

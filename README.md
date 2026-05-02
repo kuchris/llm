@@ -77,6 +77,7 @@ step16_prepare_alpaca.py                    Alpaca formatter
 step20_prepare_dolly.py                     Dolly-15k formatter
 step21_prepare_bea_grammar.py               BEA / WI+LOCNESS grammar formatter
 step22_prepare_free_tokenizer_train.py      builds combined tokenizer text
+step29_prepare_fineweb_edu.py               streams a bounded FineWeb-Edu sample
 ```
 
 Qwen tools:
@@ -303,6 +304,36 @@ total tensors: 751.6M parameters
 model body:    596.0M parameters
 lm_head:       155.6M parameters
 ```
+
+## Qwen-Tokenizer Scratch Pretraining
+
+The current Qwen-tokenizer scratch pretrain preset uses a bounded local file from FineWeb-Edu:
+
+```text
+data/fineweb_edu_sample_10bt.txt
+```
+
+Prepare it with:
+
+```powershell
+uv run python step29_prepare_fineweb_edu.py --max-chars 200000000
+```
+
+This streams from:
+
+```text
+HuggingFaceFW/fineweb-edu, config sample-10BT
+```
+
+The full sample is much larger than this local file. Increase `--max-chars` only if the first run is stable and you have enough disk space.
+
+For a larger-token overnight run:
+
+```powershell
+uv run python step9_train_tiny_transformer.py --preset qwen_tokenizer_tiny_pretrain --device auto --block-size 512 --batch-size 4 --max-iters 100000 --resume --save-every 10000
+```
+
+This is still scratch training. Better data helps, but it does not transfer Qwen's pretrained knowledge.
 
 ## Tokenizer Experiments
 
