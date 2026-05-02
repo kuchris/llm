@@ -268,23 +268,23 @@ PRESETS = {
         "init_checkpoint": "checkpoints/free_dolly_sft_bpe/tiny_transformer.pt",
     },
     "qwen_tokenizer_tiny_pretrain": {
-        "data": "data/fineweb_edu_sample_10bt.txt",
+        "data": "data/fineweb_edu_qwen_uint32/manifest.json",
         "checkpoint": "checkpoints/qwen_tokenizer_tiny_pretrain/tiny_transformer.pt",
-        "max_chars": 200000000,
-        "block_size": 1024,
+        "max_chars": 0,
+        "block_size": 256,
         "batch_size": 4,
         "max_iters": 50000,
         "learning_rate": 3e-4,
         "tokenizer": "hf",
         "tokenizer_file": "",
         "tokenizer_name": "models/qwen3-0.6b",
-        "task": "lm",
+        "task": "lm_memmap",
         "init_checkpoint": "",
         "dim": 768,
-        "n_layers": 12,
-        "n_heads": 12,
-        "n_kv_heads": 6,
-        "hidden_dim": 1024,
+        "n_layers": 8,
+        "n_heads": 8,
+        "n_kv_heads": 4,
+        "hidden_dim": 2048,
         "multiple_of": 64,
         "norm_eps": 1e-6,
         "dropout": 0.0,
@@ -333,6 +333,28 @@ PRESETS = {
         "norm_eps": 1e-6,
         "dropout": 0.1,
     },
+    "qwen_tokenizer_overfit": {
+        "data": "data/qwen_overfit_paragraph.txt",
+        "checkpoint": "checkpoints/qwen_tokenizer_overfit/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 32,
+        "batch_size": 8,
+        "max_iters": 200,
+        "learning_rate": 1e-3,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "models/qwen3-0.6b",
+        "task": "lm",
+        "init_checkpoint": "",
+        "dim": 256,
+        "n_layers": 2,
+        "n_heads": 4,
+        "n_kv_heads": 2,
+        "hidden_dim": 512,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.0,
+    },
     "english_bpe_tiny_pretrain": {
         "data": "data/fineweb_edu_sample_10bt.txt",
         "checkpoint": "checkpoints/english_bpe_tiny_pretrain/tiny_transformer.pt",
@@ -373,6 +395,50 @@ PRESETS = {
         "n_heads": 6,
         "n_kv_heads": 3,
         "hidden_dim": 1024,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.1,
+    },
+    "bpe32k_tiny_pretrain": {
+        "data": "data/fineweb_edu_bpe32k_uint16/manifest.json",
+        "checkpoint": "checkpoints/bpe32k_tiny_pretrain/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 256,
+        "batch_size": 4,
+        "max_iters": 50000,
+        "learning_rate": 3e-4,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "tokenizers/english_bpe_32768",
+        "task": "lm_memmap",
+        "init_checkpoint": "",
+        "dim": 768,
+        "n_layers": 8,
+        "n_heads": 8,
+        "n_kv_heads": 4,
+        "hidden_dim": 2048,
+        "multiple_of": 64,
+        "norm_eps": 1e-6,
+        "dropout": 0.0,
+    },
+    "bpe32k_tiny_sft": {
+        "data": "data/alpaca_cleaned_train_eos_sft.txt",
+        "checkpoint": "checkpoints/bpe32k_tiny_alpaca_sft/tiny_transformer.pt",
+        "max_chars": 0,
+        "block_size": 256,
+        "batch_size": 4,
+        "max_iters": 13000,
+        "learning_rate": 1e-4,
+        "tokenizer": "hf",
+        "tokenizer_file": "",
+        "tokenizer_name": "tokenizers/english_bpe_32768",
+        "task": "sft",
+        "init_checkpoint": "checkpoints/bpe32k_tiny_pretrain/tiny_transformer.pt",
+        "dim": 768,
+        "n_layers": 8,
+        "n_heads": 8,
+        "n_kv_heads": 4,
+        "hidden_dim": 2048,
         "multiple_of": 64,
         "norm_eps": 1e-6,
         "dropout": 0.1,
@@ -546,6 +612,14 @@ def save_checkpoint(checkpoint_path: Path, checkpoint: dict, label: str) -> None
     print(f"{label}: {checkpoint_path}")
 
 
+def write_loss_log(log_path: Path, step: int, loss: float, learning_rate: float) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    if not log_path.exists():
+        log_path.write_text("step,loss,learning_rate\n", encoding="utf-8")
+    with log_path.open("a", encoding="utf-8", newline="\n") as handle:
+        handle.write(f"{step},{loss:.8f},{learning_rate:.10g}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--preset", choices=sorted(PRESETS), default=DEFAULT_PRESET)
@@ -564,6 +638,8 @@ def main() -> None:
     parser.add_argument("--device", default="auto")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--save-every", type=int, default=200)
+    parser.add_argument("--log-file", default=None)
+    parser.add_argument("--log-every", type=int, default=20)
     cli_args = parser.parse_args()
     defaults = PRESETS[cli_args.preset]
 
@@ -630,6 +706,9 @@ def main() -> None:
     learning_rate = cli_args.learning_rate or defaults["learning_rate"]
     checkpoint_path = Path(cli_args.checkpoint or defaults["checkpoint"])
     resume_path = checkpoint_path
+    log_path = Path(cli_args.log_file) if cli_args.log_file else checkpoint_path.with_name("loss_log.csv")
+    if not cli_args.resume and log_path.exists():
+        log_path.unlink()
 
     if len(token_ids) <= block_size + 1:
         raise ValueError("dataset is too short for the chosen block size")
@@ -742,13 +821,15 @@ def main() -> None:
             if first_loss is None:
                 first_loss = loss.item()
 
-            if step % 20 == 0:
+            if cli_args.log_every > 0 and step % cli_args.log_every == 0:
                 last_loss = loss.item()
+                current_lr = optimizer.param_groups[0]["lr"]
+                write_loss_log(log_path, step, last_loss, current_lr)
                 if use_tqdm:
                     progress.set_postfix(loss=f"{last_loss:.4f}")
-                    tqdm.write(f"step {step:3d} | loss {last_loss:.4f}")
+                    tqdm.write(f"step {step:3d} | loss {last_loss:.4f} | lr {current_lr:.3g}")
                 else:
-                    print(f"step {step:5d} / {max_iters:5d} | loss {last_loss:.4f}")
+                    print(f"step {step:5d} / {max_iters:5d} | loss {last_loss:.4f} | lr {current_lr:.3g}")
 
             if cli_args.save_every > 0 and step > start_step and step % cli_args.save_every == 0:
                 checkpoint = build_checkpoint(
